@@ -23,6 +23,7 @@ const NREPEAT int = 10                                                          
 
 //// types
 type timingResult struct {
+	// Container for collecting results before persisting to DB
 	WaitgroupSize       int
 	ConcurrentTimingsMs [REQUESTS]int64
 	ConcurrentTotalMs   int64
