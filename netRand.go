@@ -252,25 +252,26 @@ func persistConcurrentTimings(runId int, timings timingResult, db *sql.DB) {
 		log.Fatalln(err)
 	}
 
-	insertRun, err := db.Prepare(`INSERT INTO runs(
-		waitgroup_size, 
-		sequential_total_ms, 
-		concurrent_total_ms, 
-		concurrent_sequential_ratio) 
-		VALUES(?, ?, ?, ?)`)
+	insertTiming, err := db.Prepare(`INSERT INTO concurrent_timings(
+		run, 
+		channel_position, 
+		timing_ms) 
+		VALUES(?, ?, ?)`)
 
 	if err != nil {
 		log.Fatalln(err)
 	}
-	_, err = tx.Stmt(insertRun).Exec(
-		timings.WaitgroupSize,
-		timings.SequentialTotalMs,
-		timings.ConcurrentTotalMs,
-		float32(timings.ConcurrentTotalMs)/float32(timings.SequentialTotalMs),
-	)
-	if err != nil {
-		log.Fatalln(err)
+	for i, timing := range timings.ConcurrentTimingsMs {
+		_, err = tx.Stmt(insertTiming).Exec(
+			runId,
+			i,
+			timing,
+		)
+		if err != nil {
+			log.Fatalln(err)
+		}
 	}
+
 	err = tx.Commit()
 
 	if err != nil {
