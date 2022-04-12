@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -14,12 +15,12 @@ import (
 )
 
 ///// global vars
-const REQUESTS int = 100                                                            // Single run size, performed two times (concurrent and sequential)
-const URL string = "https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" // Some file on a CDN somewhere; used for the GET requests
-const DBNAME string = "netRand.db"                                                  // Name of the db file. Saved next to the executable
-const WGMIN int = 1                                                                 // Start range for waitgroup size (inclusive)
-const WGMAX int = 11                                                                // Stop range for waitgroup size (exclusive)
-const NREPEAT int = 10                                                              // Number of times to repeat a run for a specific waitgroup size
+const REQUESTS int = 100           // Single run size, performed two times (concurrent and sequential)
+const URL string = ""              // Some file on a CDN somewhere; used for the GET requests
+const DBNAME string = "netRand.db" // Name of the db file. Saved next to the executable
+const WGMIN int = 1                // Start range for waitgroup size (inclusive)
+const WGMAX int = 101              // Stop range for waitgroup size (exclusive)
+const NREPEAT int = 10             // Number of times to repeat a run for a specific waitgroup size
 
 //// types
 type timingResult struct {
@@ -41,6 +42,9 @@ func main() {
 			// repeat for more data points
 			timings := requestTimes(i)
 			persistTimings(timings, db)
+			fmt.Printf("\n======== %v of %v ============\n", j+1, NREPEAT)
+			fmt.Printf("current waitgroup size: %v\n", i)
+			fmt.Printf("max waitgroup size: %v\n", WGMAX-1)
 		}
 	}
 
