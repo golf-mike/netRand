@@ -14,12 +14,12 @@ import (
 )
 
 ///// global vars
-const REQUESTS int = 100
-const URL string = "https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"
-const DBNAME string = "netRand.db"
-const WGMIN int = 1
-const WGMAX int = 11
-const NREPEAT int = 10
+const REQUESTS int = 100                                                            // Single run size, performed two times (concurrent and sequential)
+const URL string = "https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" // Some file on a CDN somewhere; used for the GET requests
+const DBNAME string = "netRand.db"                                                  // Name of the db file. Saved next to the executable
+const WGMIN int = 1                                                                 // Start range for waitgroup size (inclusive)
+const WGMAX int = 11                                                                // Stop range for waitgroup size (exclusive)
+const NREPEAT int = 10                                                              // Number of times to repeat a run for a specific waitgroup size
 
 //// types
 type timingResult struct {
