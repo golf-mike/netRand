@@ -34,11 +34,10 @@ type timingResult struct {
 func main() {
 	db := setupDb()
 	defer db.Close()
-	// todo parametrize inner and outer loop size
-	// perform for wg sizes 1...32
 	for i := WGMIN; i < WGMAX; i++ {
-		// perform 10 times for every wg
+		// waitgroup size range
 		for j := 0; j < NREPEAT; j++ {
+			// repeat for more data points
 			timings := requestTimes(i)
 			persistTimings(timings, db)
 		}
