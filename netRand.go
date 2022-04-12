@@ -14,16 +14,19 @@ import (
 )
 
 ///// global vars
-const NTIMES int = 100
+const REQUESTS int = 100
 const URL string = "https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"
 const DBNAME string = "netRand.db"
+const WGMIN int = 1
+const WGMAX int = 11
+const NREPEAT int = 10
 
 //// types
 type timingResult struct {
 	WaitgroupSize       int
-	ConcurrentTimingsMs [NTIMES]int64
+	ConcurrentTimingsMs [REQUESTS]int64
 	ConcurrentTotalMs   int64
-	SequentialTimingsMs [NTIMES]int64
+	SequentialTimingsMs [REQUESTS]int64
 	SequentialTotalMs   int64
 }
 
@@ -33,18 +36,168 @@ func main() {
 	defer db.Close()
 	// todo parametrize inner and outer loop size
 	// perform for wg sizes 1...32
-	for i := 1; i < 2; i++ {
+	for i := WGMIN; i < WGMAX; i++ {
 		// perform 10 times for every wg
-		for j := 0; j < 1; j++ {
+		for j := 0; j < NREPEAT; j++ {
 			timings := requestTimes(i)
-
-			err := persistTimings(timings, db)
-			if err != nil {
-				log.Fatalln(err)
-			}
+			persistTimings(timings, db)
 		}
 	}
 
+}
+
+func requestTimes(waitgroupSize int) timingResult {
+	// do NTIMES requests in go routines with waitgroupSize
+	// do NTIMES requests sequentially
+
+	timings_concurrent, total_concurrent := concurrentRequests(waitgroupSize)
+	timings_sequential, total_sequential := sequentialRequests()
+
+	return timingResult{
+		WaitgroupSize:       waitgroupSize,
+		ConcurrentTimingsMs: timings_concurrent,
+		ConcurrentTotalMs:   total_concurrent,
+		SequentialTimingsMs: timings_sequential,
+		SequentialTotalMs:   total_sequential,
+	}
+
+}
+func persistTimings(timings timingResult, db *sql.DB) {
+	persistRun(timings, db)
+	currentRunId := getCurrentRunId(db)
+	persistConcurrentTimings(currentRunId, timings, db)
+	persistSequentialTimings(currentRunId, timings, db)
+}
+func concurrentRequests(waitgroupSize int) ([REQUESTS]int64, int64) {
+	start := time.Now()
+
+	var wg sync.WaitGroup
+	var timings [REQUESTS]int64
+	ch := make(chan int64, REQUESTS)
+
+	for i := range timings {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			doGetChannel(URL, ch)
+		}()
+		// waitgroupsize is controlled using modulo
+		// making sure experiment size is always NTIMES
+		// independent of waitgroupsize
+		if i%waitgroupSize == 0 {
+			wg.Wait()
+		}
+	}
+	wg.Wait()
+	close(ch)
+
+	count := 0
+	for ret := range ch {
+		timings[count] = ret
+		count++
+	}
+
+	return timings, time.Since(start).Milliseconds()
+}
+func doGetChannel(address string, channel chan int64) {
+	// time get request and send to channel
+	startSub := time.Now().UnixMilli()
+	_, err := http.Get(address)
+	if err != nil {
+		log.Fatalln(err)
+	}
+	stopSub := time.Now().UnixMilli()
+	delta := stopSub - startSub
+	channel <- delta
+}
+func sequentialRequests() ([REQUESTS]int64, int64) {
+	startGo := time.Now()
+	var timings_sequential [REQUESTS]int64
+	for i := range timings_sequential {
+		timings_sequential[i] = doGetReturn(URL)
+	}
+	return timings_sequential, time.Since(startGo).Milliseconds()
+}
+func doGetReturn(address string) int64 {
+	// time get request without a waitgroup/channel
+	start := time.Now()
+	_, err := http.Get(address)
+	if err != nil {
+		log.Fatalln(err)
+	}
+	duration := time.Since(start).Milliseconds()
+	return duration
+}
+
+//// DB
+func setupDb() *sql.DB {
+	//      __________________________runs____________________
+	//     |                                                  |
+	// concurrent_timings(fk: run_id)         sequential_timings(fk: run_id)
+	//
+	const createRuns string = `
+    CREATE TABLE IF NOT EXISTS runs (
+    run_id INTEGER NOT NULL PRIMARY KEY,
+    time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    waitgroup_size INTEGER,
+    concurrent_total_ms INTEGER,
+    sequential_total_ms INTEGER,
+    concurrent_sequential_ratio REAL
+    );`
+
+	const createSequentialTimings string = `
+	CREATE TABLE IF NOT EXISTS sequential_timings (
+	run INTEGER,
+	call_number INTEGER,
+	timing_ms INTEGER,
+	FOREIGN KEY(run) REFERENCES runs(run_id)
+	);`
+
+	const createConcurrentTimings string = `
+	CREATE TABLE IF NOT EXISTS concurrent_timings (
+	run INTEGER,
+	channel_position INTEGER,
+	timing_ms INTEGER,
+	FOREIGN KEY(run) REFERENCES runs(run_id)
+	);`
+	// retrieve platform appropriate connection string
+	dbString := getConnectionString(DBNAME)
+	db, err := sql.Open("sqlite3", dbString)
+	if err != nil {
+		log.Fatalln(err)
+	}
+	if _, err := db.Exec(createRuns); err != nil {
+		log.Fatalln(err)
+	}
+	if _, err := db.Exec(createSequentialTimings); err != nil {
+		log.Fatalln(err)
+	}
+	if _, err := db.Exec(createConcurrentTimings); err != nil {
+		log.Fatalln(err)
+	}
+	return db
+}
+func getConnectionString(dbName string) string {
+	// Generate platform appropriate connection string
+	// the db is placed in the same directory as the current executable
+
+	// retrieve the path to the currently executed executable
+	ex, err := os.Executable()
+	if err != nil {
+		panic(err)
+	}
+	// retrieve path to containing dir
+	dbDir := filepath.Dir(ex)
+
+	// Append platform appropriate separator and dbName
+	if runtime.GOOS == "windows" {
+
+		dbDir = dbDir + "\\" + dbName
+
+	} else {
+		dbDir = dbDir + "/" + dbName
+	}
+	return dbDir
 }
 func persistRun(timings timingResult, db *sql.DB) {
 	tx, err := db.Begin()
@@ -78,6 +231,7 @@ func persistRun(timings timingResult, db *sql.DB) {
 		log.Fatalln(err)
 	}
 }
+
 func getCurrentRunId(db *sql.DB) int {
 	rows, err := db.Query("SELECT MAX(run_id) FROM runs")
 	if err != nil {
@@ -156,156 +310,4 @@ func persistSequentialTimings(runId int, timings timingResult, db *sql.DB) {
 	if err != nil {
 		log.Fatalln(err)
 	}
-}
-func persistTimings(timings timingResult, db *sql.DB) {
-	// Error checking
-	persistRun(timings, db)
-	currentRunId := getCurrentRunId(db)
-	persistConcurrentTimings(currentRunId, timings, db)
-	persistSequentialTimings(currentRunId, timings, db)
-}
-func requestTimes(waitgroupSize int) timingResult {
-	// do NTIMES requests in go routines with waitgroupSize
-	// do NTIMES requests sequentially
-
-	timings_concurrent, total_concurrent := concurrentRequests(waitgroupSize)
-	timings_sequential, total_sequential := sequentialRequests()
-
-	return timingResult{
-		WaitgroupSize:       waitgroupSize,
-		ConcurrentTimingsMs: timings_concurrent,
-		ConcurrentTotalMs:   total_concurrent,
-		SequentialTimingsMs: timings_sequential,
-		SequentialTotalMs:   total_sequential,
-	}
-
-}
-
-func sequentialRequests() ([NTIMES]int64, int64) {
-	startGo := time.Now()
-	var timings_sequential [NTIMES]int64
-	for i := range timings_sequential {
-		timings_sequential[i] = doGetReturn(URL)
-	}
-	return timings_sequential, time.Since(startGo).Milliseconds()
-}
-func doGetReturn(address string) int64 {
-	// time get request without a waitgroup/channel
-	start := time.Now()
-	_, err := http.Get(address)
-	if err != nil {
-		log.Fatalln(err)
-	}
-	duration := time.Since(start).Milliseconds()
-	return duration
-}
-func concurrentRequests(waitgroupSize int) ([NTIMES]int64, int64) {
-	start := time.Now()
-
-	var wg sync.WaitGroup
-	var timings [NTIMES]int64
-	ch := make(chan int64, NTIMES)
-
-	for i := range timings {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			doGetChannel(URL, ch)
-		}()
-		if i%waitgroupSize == 0 {
-			wg.Wait()
-		}
-	}
-	wg.Wait()
-	close(ch)
-
-	count := 0
-	for ret := range ch {
-		timings[count] = ret
-		count++
-	}
-
-	return timings, time.Since(start).Milliseconds()
-}
-func doGetChannel(address string, channel chan int64) {
-	// time get request and send to channel
-	startSub := time.Now().UnixMilli()
-	_, err := http.Get(address)
-	if err != nil {
-		log.Fatalln(err)
-	}
-	stopSub := time.Now().UnixMilli()
-	delta := stopSub - startSub
-	channel <- delta
-}
-
-//// DB
-func setupDb() *sql.DB {
-	//      __________________________runs____________________
-	//     |                                                  |
-	// concurrent_timings(fk: run_id)         sequential_timings(fk:run_id)
-	//
-	const createRuns string = `
-    CREATE TABLE IF NOT EXISTS runs (
-    run_id INTEGER NOT NULL PRIMARY KEY,
-    time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    waitgroup_size INTEGER,
-    concurrent_total_ms INTEGER,
-    sequential_total_ms INTEGER,
-    concurrent_sequential_ratio REAL
-    );`
-
-	const createSequentialTimings string = `
-	CREATE TABLE IF NOT EXISTS sequential_timings (
-	run INTEGER,
-	call_number INTEGER,
-	timing_ms INTEGER,
-	FOREIGN KEY(run) REFERENCES runs(run_id)
-	);`
-
-	const createConcurrentTimings string = `
-	CREATE TABLE IF NOT EXISTS concurrent_timings (
-	run INTEGER,
-	channel_position INTEGER,
-	timing_ms INTEGER,
-	FOREIGN KEY(run) REFERENCES runs(run_id)
-	);`
-	// retrieve the fully qualified path for (path to directory containing executable) + DBNAME
-	dbPath := getDBpath(DBNAME)
-	db, err := sql.Open("sqlite3", dbPath)
-	if err != nil {
-		log.Fatalln(err)
-	}
-	if _, err := db.Exec(createRuns); err != nil {
-		log.Fatalln(err)
-	}
-	if _, err := db.Exec(createSequentialTimings); err != nil {
-		log.Fatalln(err)
-	}
-	if _, err := db.Exec(createConcurrentTimings); err != nil {
-		log.Fatalln(err)
-	}
-	return db
-}
-func getDBpath(dbName string) string {
-	// Retrieve platform appropriate path string to .db file
-	// It is placed in the same directory as the current executable
-
-	// retrieves the path to the currently executed executable
-	ex, err := os.Executable()
-	if err != nil {
-		panic(err)
-	}
-	// retrieve path to containing dir
-	dbDir := filepath.Dir(ex)
-
-	// Append platform appropriate separator and dbName
-	if runtime.GOOS == "windows" {
-
-		dbDir = dbDir + "\\" + dbName
-
-	} else {
-		dbDir = dbDir + "/" + dbName
-	}
-	return dbDir
 }
