@@ -15,12 +15,12 @@ import (
 )
 
 ///// global vars
-const REQUESTS int = 100           // Single run size, performed two times (concurrent and sequential)
-const URL string = ""              // Some file on a CDN somewhere; used for the GET requests
-const DBNAME string = "netRand.db" // Name of the db file. Saved next to the executable
-const WGMIN int = 1                // Start range for waitgroup size (inclusive)
-const WGMAX int = 101              // Stop range for waitgroup size (exclusive)
-const NREPEAT int = 10             // Number of times to repeat a run for a specific waitgroup size
+const REQUESTS int = 100                                              // Single run size, performed two times (concurrent and sequential)
+const URL string = "https://code.jquery.com/jquery-3.6.0.slim.min.js" // Some file on a CDN somewhere; used for the GET requests
+const DBNAME string = "netRandwg100n3.db"                             // Name of the db file. Saved next to the executable
+const WGMIN int = 1                                                   // Start range for waitgroup size (inclusive)
+const WGMAX int = 101                                                 // Stop range for waitgroup size (exclusive)
+const NREPEAT int = 3                                                 // Number of times to repeat a run for a specific waitgroup size
 
 //// types
 type timingResult struct {
