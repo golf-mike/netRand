@@ -24,7 +24,9 @@ A single run performs:
 - persisting of total and inidividual request times
 
 The number of repetitions per waitgroupsize and the range of waitgroupsizes can be controlled (compile time only) by global constants. 
+DBs and binary included for convenience. This project will not be further developed.
 
 # Why
 After https://stackoverflow.com/questions/71737286/unexpected-behaviour-of-time-now-in-goroutine I was curious about the impact on performance of goroutines when using 
 different waitgroup sizes.
+
